@@ -5,7 +5,7 @@ import androidx.room3.Database
 import androidx.room3.Room
 import androidx.room3.RoomDatabase
 
-@Database(entities = [TxEntity::class, CardSyncEntity::class], version = 1, exportSchema = false)
+@Database(entities = [TxEntity::class, CardSyncEntity::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): StatementDao
 }
@@ -20,3 +20,4 @@ fun provideDatabase(context: Context): AppDatabase =
     ).fallbackToDestructiveMigration(true).build()
 
 fun provideStatementDao(db: AppDatabase): StatementDao = db.dao()
+

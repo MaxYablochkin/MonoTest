@@ -13,14 +13,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -31,7 +34,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -59,14 +64,15 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.monotest.R
-import com.example.monotest.cards.transactions.AllTransactionScreen
 import com.example.monotest.cards.transactions.AccountTransactionSharedScreen
+import com.example.monotest.cards.transactions.AllTransactionScreen
+import com.example.monotest.cards.transactions.sampleOperationsGroups
+import com.example.monotest.data.api.TxCursor
 import com.example.monotest.designsystem.BankCard
 import com.example.monotest.designsystem.operationsRevealBlur
 import com.example.monotest.designsystem.operationsSharedBoundsKey
 import com.example.monotest.designsystem.rememberOperationsRevealState
 import com.example.monotest.designsystem.rememberRevealConnection
-import com.example.monotest.cards.transactions.sampleOperationsGroups
 import com.example.monotest.designsystem.scaleHorizontalPagerContent
 import com.example.monotest.designsystem.topAppBarBlur
 import com.example.monotest.designsystem.translationXOperationsScreen
@@ -145,6 +151,7 @@ fun AccountScreen(
             containerColor = Color.White,
             topBar = {
                 TopAppBar(
+                    windowInsets = TopAppBarDefaults.windowInsets.only(WindowInsetsSides.Top),
                     modifier = Modifier.topAppBarBlur(scrollProgress, hazeState),
                     title = {},
                     navigationIcon = {
@@ -154,7 +161,7 @@ fun AccountScreen(
                                 .size(45.dp)
                                 .clip(CircleShape)
                                 .combinedClickable(
-                                    onClick = { },
+                                    onClick = { onAction(AccountAction.OnToggleDebugPanel) },
                                     onLongClick = { onAction(AccountAction.OnToggleDebugPanel) }
                                 ),
                             contentAlignment = Alignment.Center
@@ -185,7 +192,11 @@ fun AccountScreen(
                             )
                             HorizontalPager(
                                 verticalAlignment = Alignment.Top,
-                                contentPadding = PaddingValues(top = 60.dp, start = 35.dp, end = 35.dp),
+                                contentPadding = PaddingValues(
+                                    top = 60.dp,
+                                    start = 35.dp,
+                                    end = 35.dp
+                                ),
                                 state = pagerState,
                                 key = { state.cards[it].id },
                                 flingBehavior = PagerDefaults.flingBehavior(
@@ -280,9 +291,14 @@ fun AccountScreen(
                     if (isAllMode) {
                         onAction(AccountAction.OnLoadMoreAll)
                     } else {
-                        val expectedOldest = state.oldestSeqByCard[currentCard.cardId]
+                        val expectedOldest: TxCursor? = state.oldestCursorByCard[currentCard.cardId]
                         if (expectedOldest != null) {
-                            onAction(AccountAction.OnLoadMoreCard(currentCard.cardId, expectedOldest))
+                            onAction(
+                                AccountAction.OnLoadMoreCard(
+                                    currentCard.cardId,
+                                    expectedOldest
+                                )
+                            )
                         }
                     }
                 },
@@ -326,15 +342,18 @@ private fun DebugPanelDialog(
 
                 state.cards.forEach { card ->
                     val sync = stats.syncByCard[card.cardId]
+                    val pending = stats.pendingNewByCard[card.cardId] ?: 0
                     val windowText = if (sync != null) {
-                        "[${sync.oldestSeq} .. ${sync.newestSeq}] end=${sync.reachedEnd}"
+                        val gapSuffix = if (pending > 0) " (+$pending нових)" else ""
+                        "[t=${sync.oldestTime} .. ${sync.newestTime}] end=${sync.reachedEnd}$gapSuffix"
                     } else {
                         "не завантажено"
                     }
                     Text(
                         text = "• ${card.title}: $windowText",
                         fontSize = 12.sp,
-                        color = Color(0xFF4A4E69)
+                        color = if (pending > 0) Color(0xFFD32F2F) else Color(0xFF4A4E69),
+                        fontWeight = if (pending > 0) FontWeight.W600 else FontWeight.Normal
                     )
                 }
 
@@ -375,6 +394,13 @@ private fun DebugPanelDialog(
                 ) {
                     Text("Наступний запит впаде (IOException)")
                 }
+
+                OutlinedButton(
+                    onClick = { onAction(AccountAction.OnDemoResetAll) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Скинути БД та демо-дані (Reset)")
+                }
             }
         },
         confirmButton = {
@@ -384,8 +410,6 @@ private fun DebugPanelDialog(
         }
     )
 }
-
-
 
 @Preview
 @Composable

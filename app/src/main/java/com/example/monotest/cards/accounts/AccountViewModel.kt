@@ -5,6 +5,7 @@ import com.example.monotest.cards.mapper.mapTransactionsToGroups
 import com.example.monotest.cards.mapper.toOperation
 import com.example.monotest.core.BaseViewModel
 import com.example.monotest.data.api.FakeStatementApi
+import com.example.monotest.data.api.TxCursor
 import com.example.monotest.database.CardSyncEntity
 import com.example.monotest.database.TxEntity
 import com.example.monotest.domain.StatementRepository
@@ -13,7 +14,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -23,13 +23,23 @@ private data class UiControlState(
     val selectedCardIndex: Int = 0,
     val isAllOperationsOpen: Boolean = false,
     val showAllCardsInSheet: Boolean = false,
-    val syncStatus: SyncStatus = SyncStatus.Idle,
+    val refreshingCount: Int = 0,
+    val loadingMoreCount: Int = 0,
     val errorMessage: String? = null,
     val isDebugPanelOpen: Boolean = false,
     val debugStatusMessage: String? = null,
     val demoTick: Int = 0,
     val lastFailedAction: (() -> Unit)? = null
-)
+) {
+    val syncStatus: SyncStatus
+        get() = when {
+            refreshingCount > 0 -> SyncStatus.Refreshing
+            loadingMoreCount > 0 -> SyncStatus.LoadingMore
+            errorMessage != null -> SyncStatus.Error
+            else -> SyncStatus.Idle
+        }
+}
+
 
 class AccountViewModel(
     private val repository: StatementRepository,
@@ -40,12 +50,11 @@ class AccountViewModel(
     private val controlFlow = MutableStateFlow(UiControlState())
     private var refreshJob: Job? = null
     private var loadMoreJob: Job? = null
+    private var resetJob: Job? = null
 
     init {
-        viewModelScope.launch {
-            repository.clearLocalStorage()
-            refreshAll()
-        }
+        // Preserve existing Room cache on cold start / restart and refresh on top of it
+        refreshAll()
     }
 
     private val perCardFlows = combine(
@@ -88,7 +97,7 @@ class AccountViewModel(
         val cardGroupsByCard = data.byCard.mapValues { (_, list) ->
             mapTransactionsToGroups(list)
         }
-        val oldestSeqByCard = data.syncByCard.mapValues { (_, sync) -> sync.oldestSeq }
+        val oldestCursorByCard = data.syncByCard.mapValues { (_, sync) -> sync.oldestCursor }
         val reachedEndByCard = data.syncByCard.mapValues { (_, sync) -> sync.reachedEnd }
 
         val allGroups = mapTransactionsToGroups(data.allTx)
@@ -110,8 +119,12 @@ class AccountViewModel(
         }
 
         val pendingNewByCard = CardType.cardIds.associateWith { cardId ->
-            val syncedNewest = data.syncByCard[cardId]?.newestSeq ?: 0L
-            fakeApi.items(cardId).count { it.seq > syncedNewest }
+            val syncedNewest = data.syncByCard[cardId]?.newestCursor
+            if (syncedNewest == null) {
+                0
+            } else {
+                fakeApi.items(cardId).count { it.cursor > syncedNewest }
+            }
         }
 
         AccountState(
@@ -119,7 +132,7 @@ class AccountViewModel(
             selectedCardIndex = ctrl.selectedCardIndex,
             recentByCard = recentByCard,
             cardGroupsByCard = cardGroupsByCard,
-            oldestSeqByCard = oldestSeqByCard,
+            oldestCursorByCard = oldestCursorByCard,
             reachedEndByCard = reachedEndByCard,
             allOperationsGroups = allGroups,
             allReachedEnd = allReachedEnd,
@@ -127,8 +140,8 @@ class AccountViewModel(
             isAllOperationsOpen = ctrl.isAllOperationsOpen,
             showAllCardsInSheet = ctrl.showAllCardsInSheet,
             syncStatus = ctrl.syncStatus,
-            isRefreshing = ctrl.syncStatus == SyncStatus.Refreshing,
-            isLoadingMore = ctrl.syncStatus == SyncStatus.LoadingMore,
+            isRefreshing = ctrl.refreshingCount > 0,
+            isLoadingMore = ctrl.loadingMoreCount > 0,
             errorMessage = ctrl.errorMessage,
             gapCards = data.gapCards,
             hasGapInCurrentFeed = hasGapInCurrent,
@@ -138,7 +151,7 @@ class AccountViewModel(
                 dbTotalRows = data.totalCount,
                 olderCalls = fakeApi.olderCalls,
                 newerCalls = fakeApi.newerCalls,
-                serverAsOfSeq = fakeApi.currentAsOfSeq(),
+                serverAsOfTime = fakeApi.currentAsOf().time,
                 syncByCard = data.syncByCard,
                 pendingNewByCard = pendingNewByCard,
                 statusMessage = ctrl.debugStatusMessage
@@ -163,7 +176,6 @@ class AccountViewModel(
                 controlFlow.update {
                     it.copy(isAllOperationsOpen = true, showAllCardsInSheet = false)
                 }
-                // Design doc Section 6: opening a card feed and pull-to-refresh invoke refresh(card)
                 refreshCard(activeCardId)
             }
 
@@ -219,11 +231,12 @@ class AccountViewModel(
     }
 
     private fun refreshCard(cardId: String) {
-        refreshJob?.cancel()
+        val previous = refreshJob
         refreshJob = viewModelScope.launch {
+            previous?.cancel()
             controlFlow.update {
                 it.copy(
-                    syncStatus = SyncStatus.Refreshing,
+                    refreshingCount = it.refreshingCount + 1,
                     errorMessage = null,
                     lastFailedAction = { refreshCard(cardId) }
                 )
@@ -232,7 +245,6 @@ class AccountViewModel(
                 repository.refresh(cardId)
                 controlFlow.update {
                     it.copy(
-                        syncStatus = SyncStatus.Idle,
                         errorMessage = null,
                         demoTick = it.demoTick + 1
                     )
@@ -242,21 +254,25 @@ class AccountViewModel(
             } catch (e: Exception) {
                 controlFlow.update {
                     it.copy(
-                        syncStatus = SyncStatus.Error,
                         errorMessage = "Помилка мережі при оновленні картки (${e.message ?: "IOException"})",
                         demoTick = it.demoTick + 1
                     )
+                }
+            } finally {
+                controlFlow.update {
+                    it.copy(refreshingCount = (it.refreshingCount - 1).coerceAtLeast(0))
                 }
             }
         }
     }
 
     private fun refreshAll() {
-        refreshJob?.cancel()
+        val previous = refreshJob
         refreshJob = viewModelScope.launch {
+            previous?.cancel()
             controlFlow.update {
                 it.copy(
-                    syncStatus = SyncStatus.Refreshing,
+                    refreshingCount = it.refreshingCount + 1,
                     errorMessage = null,
                     lastFailedAction = { refreshAll() }
                 )
@@ -265,7 +281,6 @@ class AccountViewModel(
                 repository.refreshAll()
                 controlFlow.update {
                     it.copy(
-                        syncStatus = SyncStatus.Idle,
                         errorMessage = null,
                         demoTick = it.demoTick + 1
                     )
@@ -275,21 +290,24 @@ class AccountViewModel(
             } catch (e: Exception) {
                 controlFlow.update {
                     it.copy(
-                        syncStatus = SyncStatus.Error,
                         errorMessage = "Не вдалося оновити виписку (${e.message ?: "IOException"})",
                         demoTick = it.demoTick + 1
                     )
+                }
+            } finally {
+                controlFlow.update {
+                    it.copy(refreshingCount = (it.refreshingCount - 1).coerceAtLeast(0))
                 }
             }
         }
     }
 
-    private fun loadMoreCard(cardId: String, expectedOldest: Long) {
+    private fun loadMoreCard(cardId: String, expectedOldest: TxCursor) {
         if (loadMoreJob?.isActive == true) return
         loadMoreJob = viewModelScope.launch {
             controlFlow.update {
                 it.copy(
-                    syncStatus = SyncStatus.LoadingMore,
+                    loadingMoreCount = it.loadingMoreCount + 1,
                     errorMessage = null,
                     lastFailedAction = { loadMoreCard(cardId, expectedOldest) }
                 )
@@ -298,7 +316,6 @@ class AccountViewModel(
                 repository.loadMore(cardId, expectedOldest)
                 controlFlow.update {
                     it.copy(
-                        syncStatus = SyncStatus.Idle,
                         errorMessage = null,
                         demoTick = it.demoTick + 1
                     )
@@ -308,10 +325,13 @@ class AccountViewModel(
             } catch (e: Exception) {
                 controlFlow.update {
                     it.copy(
-                        syncStatus = SyncStatus.Error,
                         errorMessage = "Не вдалося довантажити історію (${e.message ?: "IOException"})",
                         demoTick = it.demoTick + 1
                     )
+                }
+            } finally {
+                controlFlow.update {
+                    it.copy(loadingMoreCount = (it.loadingMoreCount - 1).coerceAtLeast(0))
                 }
             }
         }
@@ -322,7 +342,7 @@ class AccountViewModel(
         loadMoreJob = viewModelScope.launch {
             controlFlow.update {
                 it.copy(
-                    syncStatus = SyncStatus.LoadingMore,
+                    loadingMoreCount = it.loadingMoreCount + 1,
                     errorMessage = null,
                     lastFailedAction = { loadMoreAll() }
                 )
@@ -331,7 +351,6 @@ class AccountViewModel(
                 repository.loadMoreAll()
                 controlFlow.update {
                     it.copy(
-                        syncStatus = SyncStatus.Idle,
                         errorMessage = null,
                         demoTick = it.demoTick + 1
                     )
@@ -341,20 +360,25 @@ class AccountViewModel(
             } catch (e: Exception) {
                 controlFlow.update {
                     it.copy(
-                        syncStatus = SyncStatus.Error,
                         errorMessage = "Не вдалося довантажити загальну стрічку (${e.message ?: "IOException"})",
                         demoTick = it.demoTick + 1
                     )
+                }
+            } finally {
+                controlFlow.update {
+                    it.copy(loadingMoreCount = (it.loadingMoreCount - 1).coerceAtLeast(0))
                 }
             }
         }
     }
 
     private fun makeBlackCardDeeper() {
-        viewModelScope.launch {
+        val previous = loadMoreJob
+        loadMoreJob = viewModelScope.launch {
+            previous?.cancel()
             controlFlow.update {
                 it.copy(
-                    syncStatus = SyncStatus.LoadingMore,
+                    loadingMoreCount = it.loadingMoreCount + 1,
                     errorMessage = null,
                     lastFailedAction = { makeBlackCardDeeper() }
                 )
@@ -363,7 +387,6 @@ class AccountViewModel(
                 repository.loadMorePages(CardType.BLACK.cardId, pages = 3)
                 controlFlow.update {
                     it.copy(
-                        syncStatus = SyncStatus.Idle,
                         demoTick = it.demoTick + 1,
                         debugStatusMessage = "Чорна картка завантажена на 3 сторінки (60 операцій) глибше за інші."
                     )
@@ -373,37 +396,58 @@ class AccountViewModel(
             } catch (e: Exception) {
                 controlFlow.update {
                     it.copy(
-                        syncStatus = SyncStatus.Error,
                         demoTick = it.demoTick + 1,
                         errorMessage = "Помилка демо-сценарію (${e.message ?: "IOException"})"
                     )
+                }
+            } finally {
+                controlFlow.update {
+                    it.copy(loadingMoreCount = (it.loadingMoreCount - 1).coerceAtLeast(0))
                 }
             }
         }
     }
 
     private fun resetDemoData() {
-        refreshJob?.cancel()
-        loadMoreJob?.cancel()
-        viewModelScope.launch {
-            fakeApi.resetInitialData()
-            repository.clearLocalStorage()
+        val prevRefresh = refreshJob
+        val prevLoadMore = loadMoreJob
+        val prevReset = resetJob
+        resetJob = viewModelScope.launch {
+            prevRefresh?.cancel()
+            prevLoadMore?.cancel()
+            prevReset?.cancel()
+            prevRefresh?.join()
+            prevLoadMore?.join()
+            prevReset?.join()
+
             controlFlow.update {
                 it.copy(
-                    syncStatus = SyncStatus.Refreshing,
+                    refreshingCount = it.refreshingCount + 1,
                     errorMessage = null,
                     demoTick = it.demoTick + 1,
                     debugStatusMessage = "БД та моковий сервер скинуто до початкового стану (по 100 операцій на картку)."
                 )
             }
             try {
+                fakeApi.resetInitialData()
+                repository.clearLocalStorage()
                 repository.refreshAll()
                 controlFlow.update {
-                    it.copy(syncStatus = SyncStatus.Idle, demoTick = it.demoTick + 1)
+                    it.copy(demoTick = it.demoTick + 1)
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                controlFlow.update {
+                    it.copy(
+                        errorMessage = "Не вдалося оновити після скидання (${e.message ?: "IOException"})",
+                        demoTick = it.demoTick + 1
+                    )
+                }
+            } finally {
+                controlFlow.update {
+                    it.copy(refreshingCount = (it.refreshingCount - 1).coerceAtLeast(0))
+                }
             }
         }
     }

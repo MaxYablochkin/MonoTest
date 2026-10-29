@@ -33,7 +33,7 @@ class ExampleInstrumentedTest {
     }
 
     @Test
-    fun roomDaoAndRepository_maintainContinuousWindowAndIntersection() = runBlocking {
+    fun roomDaoAndRepository_maintainContinuousWindowAndIntersectionWithoutSeq() = runBlocking {
         val cards = listOf("card_black", "card_white")
         val fake = FakeStatementApi(cards = cards, initialPerCard = 25, latencyMs = 0L, seed = 42L)
         val dao = db.dao()
@@ -44,24 +44,25 @@ class ExampleInstrumentedTest {
         assertEquals(20, dao.rowsOf("card_black").size)
         assertEquals(20, dao.rowsOf("card_white").size)
 
-        fake.appendNew("card_black", 45)
+        fake.appendNew("card_black", 45, sameTimestampGroupSize = 5)
         repo.refresh("card_black")
         assertEquals(65, dao.rowsOf("card_black").size)
 
-        // Refresh white card so unified window advances to latest asOfSeq
+        // Refresh white card so unified window advances to latest asOf cursor
         repo.refresh("card_white")
         val allWindow = repo.observeAll().first()
         val syncBlack = dao.sync("card_black")!!
         val syncWhite = dao.sync("card_white")!!
-        val expectedLo = maxOf(syncBlack.oldestSeq, syncWhite.oldestSeq)
-        val expectedHi = minOf(syncBlack.newestSeq, syncWhite.newestSeq)
+        val expectedLo = maxOf(syncBlack.oldestCursor, syncWhite.oldestCursor)
+        val expectedHi = minOf(syncBlack.newestCursor, syncWhite.newestCursor)
 
         assertEquals(
             (fake.items("card_black") + fake.items("card_white"))
-                .filter { it.seq in expectedLo..expectedHi }
-                .map { it.seq }
-                .sortedDescending(),
-            allWindow.map { it.seq }
+                .filter { it.cursor in expectedLo..expectedHi }
+                .sortedByDescending { it.cursor }
+                .map { it.id },
+            allWindow.map { it.id }
         )
     }
 }
+

@@ -1,5 +1,7 @@
 package com.example.monotest.cards.accounts
 
+import com.example.monotest.data.api.TxCursor
+
 sealed interface AccountAction {
     data class OnSelectCardIndex(val index: Int) : AccountAction
     data object OnAllOperationsClick : AccountAction
@@ -9,7 +11,7 @@ sealed interface AccountAction {
     // Refresh & pagination actions
     data class OnRefreshCard(val cardId: String) : AccountAction
     data object OnRefreshAll : AccountAction
-    data class OnLoadMoreCard(val cardId: String, val expectedOldest: Long) : AccountAction
+    data class OnLoadMoreCard(val cardId: String, val expectedOldest: TxCursor) : AccountAction
     data object OnLoadMoreAll : AccountAction
     data object OnRetry : AccountAction
 

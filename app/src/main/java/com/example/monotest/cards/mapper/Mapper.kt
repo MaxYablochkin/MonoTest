@@ -8,6 +8,8 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+private data class DayKey(val dateCode: String, val label: String)
+
 fun mapTransactionsToGroups(
     txList: List<TxEntity>,
     nowMillis: Long = System.currentTimeMillis()
@@ -15,10 +17,10 @@ fun mapTransactionsToGroups(
     if (txList.isEmpty()) return emptyList()
 
     return txList
-        .groupBy { tx -> formatDateLabel(tx.time, nowMillis) }
-        .map { (label, items) ->
+        .groupBy { tx -> resolveDayKey(tx.time, nowMillis) }
+        .map { (dayKey, items) ->
             OperationsGroup(
-                label = label,
+                label = dayKey.label,
                 operations = items.map { tx -> tx.toOperation() }
             )
         }
@@ -26,7 +28,7 @@ fun mapTransactionsToGroups(
 
 fun TxEntity.toOperation(): Operation = Operation(
     id = id,
-    seq = seq,
+    time = time,
     cardId = cardId,
     title = title,
     subtitle = subtitle,
@@ -34,25 +36,36 @@ fun TxEntity.toOperation(): Operation = Operation(
     amount = amountKop / 100.0
 )
 
-private fun formatDateLabel(timestampSec: Long, nowMillis: Long): String {
+private fun resolveDayKey(timestampSec: Long, nowMillis: Long): DayKey {
     // Convert Unix seconds (or milliseconds if already > 10^11) to milliseconds
     val millis = if (timestampSec < 100_000_000_000L) timestampSec * 1000L else timestampSec
     val netDate = Date(millis)
     val today = Date(nowMillis)
 
-    val fmt = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
-    val txDateStr = fmt.format(netDate)
-    val todayStr = fmt.format(today)
+    val fmtCode = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+    val txDateStr = fmtCode.format(netDate)
+    val todayStr = fmtCode.format(today)
 
-    val calendar = Calendar.getInstance().apply {
+    val todayCal = Calendar.getInstance().apply { time = today }
+    val txCal = Calendar.getInstance().apply { time = netDate }
+    val yesterdayCal = Calendar.getInstance().apply {
         time = today
         add(Calendar.DAY_OF_YEAR, -1)
     }
-    val yesterdayStr = fmt.format(calendar.time)
+    val yesterdayStr = fmtCode.format(yesterdayCal.time)
 
-    return when (txDateStr) {
-        todayStr -> "Сьогодні"
-        yesterdayStr -> "Вчора"
-        else -> SimpleDateFormat("d MMMM", Locale.forLanguageTag("uk")).format(netDate)
+    val label = when {
+        txDateStr == todayStr -> "Сьогодні"
+        txDateStr == yesterdayStr -> "Вчора"
+        txCal.get(Calendar.YEAR) == todayCal.get(Calendar.YEAR) -> {
+            SimpleDateFormat("d MMMM", Locale.forLanguageTag("uk")).format(netDate)
+        }
+
+        else -> {
+            SimpleDateFormat("d MMMM yyyy", Locale.forLanguageTag("uk")).format(netDate)
+        }
     }
+
+    return DayKey(dateCode = txDateStr, label = label)
 }
+

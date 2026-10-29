@@ -43,3 +43,4 @@ enum class CardType(
         val cardIds: List<String> = entries.map { it.cardId }
     }
 }
+

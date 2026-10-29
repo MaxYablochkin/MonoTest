@@ -2,6 +2,7 @@ package com.example.monotest.cards.accounts
 
 import com.example.monotest.cards.transactions.Operation
 import com.example.monotest.cards.transactions.OperationsGroup
+import com.example.monotest.data.api.TxCursor
 import com.example.monotest.database.CardSyncEntity
 
 enum class SyncStatus {
@@ -15,7 +16,7 @@ data class DebugStats(
     val dbTotalRows: Int = 0,
     val olderCalls: Int = 0,
     val newerCalls: Int = 0,
-    val serverAsOfSeq: Long = 0L,
+    val serverAsOfTime: Long = 0L,
     val syncByCard: Map<String, CardSyncEntity> = emptyMap(),
     val pendingNewByCard: Map<String, Int> = emptyMap(),
     val statusMessage: String? = null
@@ -28,7 +29,7 @@ data class AccountState(
     // Per-card recent operations (for BankCard preview) and grouped timelines
     val recentByCard: Map<String, List<Operation>> = emptyMap(),
     val cardGroupsByCard: Map<String, List<OperationsGroup>> = emptyMap(),
-    val oldestSeqByCard: Map<String, Long> = emptyMap(),
+    val oldestCursorByCard: Map<String, TxCursor> = emptyMap(),
     val reachedEndByCard: Map<String, Boolean> = emptyMap(),
 
     // Unified "All cards" timeline (intersection of all card windows)
@@ -57,3 +58,4 @@ data class AccountState(
 ) {
     val selectedCard: CardType get() = cards.getOrElse(selectedCardIndex) { CardType.BLACK }
 }
+

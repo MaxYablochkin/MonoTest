@@ -25,13 +25,25 @@ interface StatementDao {
     @Query("SELECT * FROM card_sync")
     fun observeSync(): Flow<List<CardSyncEntity>>
 
-    @Query("SELECT * FROM tx WHERE cardId = :c ORDER BY seq DESC")
+    @Query("SELECT * FROM tx WHERE cardId = :c ORDER BY time DESC, id DESC")
     fun observeCard(c: String): Flow<List<TxEntity>>
 
-    @Query("SELECT * FROM tx WHERE seq BETWEEN :lo AND :hi ORDER BY seq DESC")
-    fun observeWindow(lo: Long, hi: Long): Flow<List<TxEntity>>
+    @Query(
+        """
+        SELECT * FROM tx
+        WHERE (time > :loTime OR (time = :loTime AND id >= :loId))
+          AND (time < :hiTime OR (time = :hiTime AND id <= :hiId))
+        ORDER BY time DESC, id DESC
+        """
+    )
+    fun observeWindow(
+        loTime: Long,
+        loId: String,
+        hiTime: Long,
+        hiId: String
+    ): Flow<List<TxEntity>>
 
-    @Query("SELECT * FROM tx WHERE cardId = :c ORDER BY seq DESC")
+    @Query("SELECT * FROM tx WHERE cardId = :c ORDER BY time DESC, id DESC")
     suspend fun rowsOf(c: String): List<TxEntity>
 
     @Query("SELECT COUNT(*) FROM tx")

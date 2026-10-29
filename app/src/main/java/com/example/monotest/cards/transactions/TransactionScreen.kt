@@ -1,5 +1,3 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
-
 package com.example.monotest.cards.transactions
 
 import androidx.activity.compose.BackHandler
@@ -34,7 +32,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -240,9 +237,9 @@ private fun TransactionGroupsList(
     listState: LazyListState = rememberLazyListState(),
 ) {
     // Keep scroll anchored at the top when new operations are prepended during refresh
-    val newestSeq = groups.firstOrNull()?.operations?.firstOrNull()?.seq ?: 0L
-    LaunchedEffect(newestSeq, hasGap, errorMessage) {
-        if ((newestSeq > 0L || hasGap || errorMessage != null) && listState.firstVisibleItemIndex <= 2) {
+    val newestOpId = groups.firstOrNull()?.operations?.firstOrNull()?.id.orEmpty()
+    LaunchedEffect(newestOpId, hasGap, errorMessage) {
+        if ((newestOpId.isNotEmpty() || hasGap || errorMessage != null) && listState.firstVisibleItemIndex <= 2) {
             listState.animateScrollToItem(0)
         }
     }
@@ -329,7 +326,7 @@ private fun TransactionGroupsList(
 
                 items(
                     items = group.operations,
-                    key = { op -> op.id.ifEmpty { "${group.label}_${op.seq}_${op.title}_${op.amountKop}" } }
+                    key = { op -> op.id.ifEmpty { "${group.label}_${op.time}_${op.title}_${op.amountKop}" } }
                 ) { op ->
                     OperationRow(op, textColor = textColor)
                 }
@@ -362,6 +359,7 @@ private fun TransactionGroupsList(
                                     )
                                 }
                             }
+
                             reachedEnd -> {
                                 Text(
                                     text = "Це все",
@@ -447,7 +445,7 @@ private fun StickyHeaderItem(
     modifier: Modifier = Modifier,
 ) {
     val animateColor by animateColorAsState(
-        targetValue = if (isPinned) Color.Black else Color.Transparent,
+        targetValue = if (isPinned) Color.Black.copy(alpha = 0.85f) else Color.Transparent,
         animationSpec = tween(durationMillis = 300)
     )
 
@@ -510,7 +508,7 @@ private fun OperationRow(
 
 data class Operation(
     val id: String = "",
-    val seq: Long = 0L,
+    val time: Long = 0L,
     val cardId: String = "",
     val title: String,
     val subtitle: String,
@@ -526,7 +524,7 @@ val sampleOperationsGroups = listOf(
         listOf(
             Operation(
                 id = "sample_1",
-                seq = 5L,
+                time = 1_729_600_500L,
                 cardId = "card_black",
                 title = "Біла → Чорна",
                 subtitle = "Між своїми картками",
@@ -534,7 +532,7 @@ val sampleOperationsGroups = listOf(
             ),
             Operation(
                 id = "sample_2",
-                seq = 4L,
+                time = 1_729_600_400L,
                 cardId = "card_white",
                 title = "Чорна → Біла",
                 subtitle = "Між своїми картками",
@@ -547,7 +545,7 @@ val sampleOperationsGroups = listOf(
         listOf(
             Operation(
                 id = "sample_3",
-                seq = 3L,
+                time = 1_729_510_300L,
                 cardId = "card_black",
                 title = "KONFETKI BARANOCHKI",
                 subtitle = "З картки mono x АТБ",
@@ -555,7 +553,7 @@ val sampleOperationsGroups = listOf(
             ),
             Operation(
                 id = "sample_4",
-                seq = 2L,
+                time = 1_729_510_200L,
                 cardId = "card_black",
                 title = "АТБ-Маркет",
                 subtitle = "З картки mono x АТБ",
@@ -563,7 +561,7 @@ val sampleOperationsGroups = listOf(
             ),
             Operation(
                 id = "sample_5",
-                seq = 1L,
+                time = 1_729_510_100L,
                 cardId = "card_black",
                 title = "Від: Олександр М.",
                 subtitle = "На мою Чорну",

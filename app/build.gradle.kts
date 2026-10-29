@@ -27,10 +27,10 @@ android {
             isShrinkResources = true
             isMinifyEnabled = true
             signingConfig = signingConfigs.getByName("debug")
-            optimization {
+            /*optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
-            }
+            }*/
         }
     }
     compileOptions {

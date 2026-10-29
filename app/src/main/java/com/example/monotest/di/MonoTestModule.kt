@@ -9,3 +9,4 @@ val appModule = module {
     viewModel<AccountViewModel>()
     includes(databaseModule)
 }
+

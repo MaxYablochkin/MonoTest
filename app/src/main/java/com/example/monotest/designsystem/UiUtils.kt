@@ -255,3 +255,4 @@ fun formatAmount(amount: Double): String {
 fun operationsSharedBoundsKey(cardId: Long): Any = "operations_bounds_$cardId"
 
 fun operationsSharedBoundsKey(cardId: String): Any = "operations_bounds_$cardId"
+

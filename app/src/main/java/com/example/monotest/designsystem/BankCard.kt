@@ -357,3 +357,4 @@ private fun PersonAvatar(isNegative: Boolean, modifier: Modifier = Modifier) {
 }
 
 data class PersonInfo(val name: String, val surname: String, val price: Float)
+
